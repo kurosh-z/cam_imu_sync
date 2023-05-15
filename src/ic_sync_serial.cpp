@@ -2,11 +2,12 @@
 #include "imu_cam_sync/ic_sync_serial.hpp"
 
 namespace ic_sync {
-IsyncSerial::IsyncSerial(std::string dev_name = DEFAULT_DEVICE_NAME,
+IsyncSerial::IsyncSerial(SerialReceivedCb recieved_cb,
+                         std::string dev_name = DEFAULT_DEVICE_NAME,
                          unsigned baudrate = DEFAULT_BAUDRATE)
     : io_service(), serial_dev(io_service), tx_in_progress(false), rx_buf{} {
   using SPB = boost::asio::serial_port_base;
-
+  this->serial_recieved_cb = recieved_cb;
   try {
     serial_dev.open(dev_name);
 
@@ -40,97 +41,34 @@ IsyncSerial::~IsyncSerial() {
 void IsyncSerial::connect() {
   io_service.post(std::bind(&IsyncSerial::do_read, this));
   // run io_serice for async io
+  // io_thread =
+  //     std::thread([this]() { utils::set_this_thread_name("ic_serial%zu", 1);
+  //     });
+
   io_thread =
-      std::thread([this]() { utils::set_this_thread_name("ic_serial%zu", 1); });
-  io_service.run();
+      std::thread(boost::bind(&boost::asio::io_service::run, &io_service));
+  // io_service.run();
 }
 void IsyncSerial::on_read(std::error_code error, size_t bytes_transferred) {
   if (error) {
     std::cout << "error reading data: " << error.message().c_str() << std::endl;
     close();
+
     return;
   }
-  std::cout << "data received: " << bytes_transferred << std::endl;
-  std::istream is(&received_data_buf);
-  std::string line;
-  std::getline(is, line);
-  std::cout << line << std::endl;
 
-  // parse_buff(line, rx_buf.size(), bytes_transferred);
+  // parse_buff(received_data_buf.data(), rx_buf.size(), bytes_transferred);
+  parse_buf(bytes_transferred);
 
-  std::cout << std::endl;
   do_read();
 }
+
 void IsyncSerial::do_read() {
-  // std::cout << "do_read: " << std::endl;
-  // auto sthis = shared_from_this();
 
   boost::asio::async_read_until(
-      serial_dev, received_data_buf, "\n",
+      serial_dev, received_data_buf, END_OF_MSG,
       boost::bind(&IsyncSerial::on_read, this, boost::asio::placeholders::error,
                   boost::asio::placeholders::bytes_transferred));
-  // boost::asio::async_read_until(
-  //     serial_dev, received_data,
-  //     [sthis](std::error_code error, size_t bytes_transferred) {
-  //       if (error) {
-  //         std::cout << "error reading data: " << error.message().c_str()
-  //                   << std::endl;
-  //         sthis->close();
-  //         return;
-  //       }
-  //       std::cout << "data received: " << bytes_transferred << std::endl;
-  //       sthis->parse_buff(sthis->rx_buf.data(), sthis->rx_buf.size(),
-  //                         bytes_transferred);
-
-  //       std::cout << std::endl;
-
-  //       sthis->do_read();
-  //     });
-
-  // serial_dev.async_read_some(
-  //     boost::asio::buffer(rx_buf),
-  //     [sthis](std::error_code error, size_t bytes_transferred) {
-  //       if (error) {
-  //         std::cout << "error reading data: " << error.message().c_str()
-  //                   << std::endl;
-  //         sthis->close();
-  //         return;
-  //       }
-  //       std::cout << "data received: " << bytes_transferred << std::endl;
-  //       sthis->parse_buff(sthis->rx_buf.data(), sthis->rx_buf.size(),
-  //                         bytes_transferred);
-
-  //       std::cout << std::endl;
-
-  //       sthis->do_read();
-  //     });
-
-  // serial_dev.async_read_some(
-  //     boost::asio::buffer(rx_buf),
-  //     [sthis](std::error_code error, size_t bytes_transferred) {
-  //       if (error) {
-  //         std::cout << "error reading data: " << error.message().c_str()
-  //                   << std::endl;
-  //         sthis->close();
-  //         return;
-  //       }
-  //       std::cout << "data received: " << bytes_transferred << std::endl;
-  //       sthis->parse_buff(sthis->rx_buf.data(), sthis->rx_buf.size(),
-  //                         bytes_transferred);
-  //       // for (auto el : sthis->rx_buf) {
-  //       //   std::cout << el;
-  //       // }
-  //       // uint64_t cnt = 0;
-  //       // for (int i = 7; i >= 0; i--) {
-  //       //   uint8_t sh = 8 * i;
-  //       //   printk(" tx_buf[%d] << %d: 0x%x \n", i, sh, tx_buf[i] << 8 * i);
-  //       //   cnt = cnt | tx_buf[i] << 8 * (i);
-  //       // }
-
-  //       std::cout << std::endl;
-
-  //       sthis->do_read();
-  //     });
 }
 
 void IsyncSerial::close() {
@@ -148,18 +86,161 @@ void IsyncSerial::close() {
   }
   io_service.reset();
 }
+void IsyncSerial::parse_buf(size_t recieved_bytes) {
+  auto timestamp = ros::Time::now();
+  auto buffer = received_data_buf.data();
+  auto first = boost::asio::buffer_cast<const uint8_t *>(buffer);
+  auto last = first + recieved_bytes;
 
-void IsyncSerial::parse_buff(uint8_t *buf, const size_t buffsize,
-                             size_t bytes_recieved) {
+  if (std::strncmp((const char *)first, RESP_GET_EXPOSURE, 17) == 0) {
+    uint16_t exposure_ms = utils::sys_get_be16(&first[17]);
+    ROS_INFO_STREAM("got exposure_ms: " << exposure_ms);
+    cmd_signal("EXPOSURE", exposure_ms);
+    received_data_buf.consume(recieved_bytes);
 
-  assert(buffsize >= bytes_recieved);
-
-  for (; bytes_recieved > 0; bytes_recieved--) {
-    auto el = *buf++;
-    std::cout << std::setfill('0') << std::setw(2) << std::hex
-              << (0xff & (uint8_t)el);
+    return;
   }
-  std::cout << '\n';
+
+  // else it should be imu message
+  uint64_t seq = utils::sys_get_be64(first);           // 8 bytes
+  uint64_t imu_stamp = utils::sys_get_be64(first + 8); // 8 bytes
+  std::array<double, 3> accel = {0, 0, 0};
+  std::array<double, 3> gyro = {0, 0, 0};
+  std::array<double, 3> magn = {0, 0, 0};
+  for (int i = 0; i < 3; i++) {
+
+    switch (i) {
+    case 0:
+      accel[0] =
+          (double)(utils::decode_int32(first + 16 + i * 24)) +
+          (double)(utils::decode_int32(first + 16 + i * 24 + 4)) / 1000000;
+      accel[1] =
+          (double)(utils::decode_int32(first + 24 + i * 24)) +
+          (double)(utils::decode_int32(first + 24 + i * 24 + 4)) / 1000000;
+      accel[2] =
+          (double)(utils::decode_int32(first + 32 + i * 24)) +
+          (double)(utils::decode_int32(first + 32 + i * 24 + 4)) / 1000000;
+      break;
+    case 1:
+      gyro[0] =
+          (double)(utils::decode_int32(first + 16 + i * 24)) +
+          (double)(utils::decode_int32(first + 16 + i * 24 + 4)) / 1000000;
+      gyro[1] =
+          (double)(utils::decode_int32(first + 24 + i * 24)) +
+          (double)(utils::decode_int32(first + 24 + i * 24 + 4)) / 1000000;
+      gyro[2] =
+          (double)(utils::decode_int32(first + 32 + i * 24)) +
+          (double)(utils::decode_int32(first + 32 + i * 24 + 4)) / 1000000;
+      break;
+    case 2:
+      magn[0] =
+          (double)(utils::decode_int32(first + 16 + i * 24)) +
+          (double)(utils::decode_int32(first + 16 + i * 24 + 4)) / 1000000;
+      magn[1] =
+          (double)(utils::decode_int32(first + 24 + i * 24)) +
+          (double)(utils::decode_int32(first + 24 + i * 24 + 4)) / 1000000;
+      magn[2] =
+          (double)(utils::decode_int32(first + 32 + i * 24)) +
+          (double)(utils::decode_int32(first + 32 + i * 24 + 4)) / 1000000;
+      break;
+    }
+  }
+  uint8_t triggered = first[88];
+
+  CamTrigger camtrig = {
+      .triggered = triggered ? true : false,
+      .seq = 0,
+      .timestamp = 0,
+  };
+  if (seq % 400 == 0) {
+    std::cout << "recieved bytes: " << recieved_bytes << std::endl;
+    std::cout << "seq:" << seq << " imu_stamp: " << imu_stamp << std::endl;
+
+    std::cout << "accel: " << accel[0] << " , " << accel[1] << " , " << accel[2]
+              << std::endl;
+
+    std::cout << "gyro: " << gyro[0] << " , " << gyro[1] << " , " << gyro[2]
+              << std::endl;
+
+    std::cout << "magn: " << magn[0] << " , " << magn[1] << " , " << magn[2]
+              << std::endl;
+    if (triggered) {
+      uint32_t trigger_seq = utils::sys_get_be64(first + 89);
+      uint32_t trigger_timestamp = utils::sys_get_be64(first + 97);
+      camtrig.seq = trigger_seq;
+      camtrig.timestamp = trigger_timestamp;
+      std::cout << "trig_seq: " << trigger_seq << std::endl;
+      std::cout << "trig_timestamp: " << trigger_timestamp << std::endl;
+    }
+    std::cout << "\n---------------------------------\n\n" << std::endl;
+  }
+  if (serial_recieved_cb) {
+
+    serial_recieved_cb(seq, timestamp, accel, gyro, magn, camtrig);
+  }
+  received_data_buf.consume(recieved_bytes);
+
+  // std::cout << "recieved data" << std::endl;
+  // for (auto elp = first; elp < last; elp++) {
+  //   std::cout << std::setfill('0') << std::setw(2) << std::hex
+  //             << (0xff & (*elp)) << "-";
+  // }
+}
+void IsyncSerial::send_bytes(uint8_t *msg, size_t len) {
+  if (!is_open()) {
+    return;
+  }
+
+  if (msg == nullptr) {
+    return;
+  }
+
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    if (wr_buf.size() >= MAX_WRQ_SIZE)
+      throw std::length_error("IsyncSerial::send_bytes: wr_buf queue overflow");
+
+    auto tx_buf = new std::array<uint8_t, 128>();
+
+    std::memcpy(tx_buf->begin(), msg, len);
+    SharedBufferPtr_t tx_ptr(tx_buf);
+    wr_buf.push_back(tx_ptr);
+  }
+
+  io_service.post(boost::bind(&IsyncSerial::do_write, this, true, len));
+
+  // io_thread =
+  //     std::thread([this]() { utils::set_this_thread_name("ic_serial%zu", 1);
+  //     });
+  // io_service.run();
+}
+void IsyncSerial::do_write(bool check_tx_state, size_t len) {
+  if (check_tx_state && tx_in_progress)
+    return;
+  tx_in_progress = true;
+  boost::asio::async_write(
+      serial_dev, boost::asio::buffer(*wr_buf.front(), len),
+      boost::asio::transfer_all(),
+      boost::bind(&IsyncSerial::on_write_ends, this,
+                  boost::asio::placeholders::error,
+                  boost::asio::placeholders::bytes_transferred));
+}
+
+void IsyncSerial::on_write_ends(const boost::system::error_code error,
+                                size_t bytes_transfered) {
+
+  if (error) {
+    std::cout << "error reading data: " << error.message().c_str() << std::endl;
+    close();
+    return;
+  }
+
+  wr_buf.pop_front();
+  if (!wr_buf.empty())
+    do_write(false, wr_buf.front()->size());
+  else
+    tx_in_progress = false;
 }
 
 } // namespace ic_sync

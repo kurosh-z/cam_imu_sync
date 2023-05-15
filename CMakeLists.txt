@@ -20,11 +20,11 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   std_srvs
+  sensor_msgs
   message_generation
 )
 
 catkin_destinations()
-
 
 
 
@@ -50,7 +50,20 @@ src/ic_sync_serial.cpp
 set (IMU_CAM_SYNC_LIB_HEADERS 
 include/imu_cam_sync/ic_sync_serial.hpp
 include/imu_cam_sync/thread_utils.hpp
+include/imu_cam_sync/bytes_utils.hpp
 )
+
+add_message_files(DIRECTORY msg
+  FILES
+  ICtrigger.msg
+)
+
+add_service_files(DIRECTORY srv
+FILES
+cmd_imu.srv
+)
+
+generate_messages(DEPENDENCIES std_msgs)
 
 catkin_package(
  INCLUDE_DIRS include
@@ -72,11 +85,13 @@ include_directories(
 
 
 # add_library(${IMU_CAM_SYNC_NODELET_NAME} ${IMU_CAM_SYNC_NODELET_SOURCES} ${IMU_CAM_SYNC_NODELET_HEADERS})
-add_library(${IMU_CAM_SYNC_LIB_NAME} src/ic_sync_serial.cpp include/imu_cam_sync/ic_sync_serial.hpp include/imu_cam_sync/thread_utils.hpp)
+add_library(${IMU_CAM_SYNC_LIB_NAME} src/ic_sync_serial.cpp include/imu_cam_sync/ic_sync_serial.hpp include/imu_cam_sync/thread_utils.hpp include/imu_cam_sync/bytes_utils.hpp)
 SET_TARGET_PROPERTIES(${IMU_CAM_SYNC_LIB_NAME} PROPERTIES LINKER_LANGUAGE CXX)
+
 target_link_libraries(${IMU_CAM_SYNC_LIB_NAME} ${catkin_LIBRARIES})
 
 add_library(${IMU_CAM_SYNC_NODELET_NAME}  src/ic_sync_nodelet.cpp  include/imu_cam_sync/ic_sync_nodelet.hpp )
+add_dependencies(${IMU_CAM_SYNC_NODELET_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS}  ${catkin_EXPORTED_TARGETS})
 
 
 target_link_libraries(${IMU_CAM_SYNC_NODELET_NAME} ${IMU_CAM_SYNC_LIB_NAME} ${CMAKE_THREAD_LIBS_INIT} ${catkin_LIBRARIES} )

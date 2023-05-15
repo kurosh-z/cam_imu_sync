@@ -2,18 +2,15 @@
 <!-- Example launch file for ECON Camera CU20 -->
 
 <launch>
-     
+     <remap from="ic_sync/mag" to="imu/magnetometer"/>
 
      <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
 
-   
-
      <node pkg="nodelet" type="nodelet" name="ic_sync_nodelet"
      args="load imu_cam_sync/ICamNodelet nodelet_manager">
- 
      <param name="dev_name" type="str" value="/dev/ttyTEL1" /> 
-      <param name="baudrate" type="int" value="921600" /> 
-
-
+     <param name="baudrate" type="int" value="921600" /> 
+     
      </node>
+   
 </launch>

@@ -1,0 +1,6 @@
+# service to get/set imu driver's parameter
+string cmd_type
+uint32 cmd_val
+---
+uint32 value # current value (if it's a get cmd)
+int32 error  # zero if no error
