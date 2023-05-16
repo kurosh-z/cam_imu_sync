@@ -95,31 +95,61 @@ void ICamNodelet::publish_imu_cam(std::uint64_t seq, ros::Time timestamp,
 bool ICamNodelet::cmd_service_handler(imu_cam_sync::cmd_imu::Request &req,
                                       imu_cam_sync::cmd_imu::Response &res) {
 
+  std::lock_guard<std::recursive_mutex> lock(cmd_srv_mutex);
   cmd_response.set = false;
+  uint8_t cmd[50] = {0};
 
-  uint8_t cmd[40] = {0};
-  std::memcpy(cmd, serial_conn->CMD_GET_EXPOSURE,
-              std::strlen(serial_conn->CMD_GET_EXPOSURE));
-  std::memcpy(cmd + std::strlen(serial_conn->CMD_GET_EXPOSURE),
-              serial_conn->END_OF_MSG, 8);
-  ROS_INFO_STREAM("sending cmd: " << (char *)cmd);
-  size_t len = std::strlen(serial_conn->CMD_GET_EXPOSURE) + 8;
-  serial_conn->send_bytes(cmd, len);
+  if (req.cmd_type == serial_conn->CMD_GET_EXPOSURE) {
+    size_t len = std::strlen(serial_conn->CMD_GET_EXPOSURE);
+    std::memcpy(cmd, serial_conn->CMD_GET_EXPOSURE, len);
+    ROS_INFO_STREAM("sending cmd: " << (char *)cmd);
+
+    serial_conn->send_bytes(cmd, len);
+
+  } else if (req.cmd_type == serial_conn->CMD_SET_EXPOSURE) {
+    size_t len = std::strlen(serial_conn->CMD_SET_EXPOSURE);
+    std::memcpy(cmd, serial_conn->CMD_SET_EXPOSURE, len); // 16 bytes
+    utils::sys_put_be32(req.cmd_val, &cmd[16]);           // + 4 bytes
+    ROS_INFO_STREAM("sending cmd: " << (char *)cmd);
+    serial_conn->send_bytes(cmd, len + 4);
+
+  } else if (req.cmd_type == serial_conn->CMD_GET_TRIGGER) {
+    size_t len = std::strlen(serial_conn->CMD_GET_TRIGGER);
+    std::memcpy(cmd, serial_conn->CMD_GET_TRIGGER, len);
+    ROS_INFO_STREAM("sending cmd: " << (char *)cmd);
+    serial_conn->send_bytes(cmd, len);
+
+  } else if (req.cmd_type == serial_conn->CMD_SET_TRIGGER) {
+    size_t len = std::strlen(serial_conn->CMD_SET_TRIGGER);
+
+    std::memcpy(cmd, serial_conn->CMD_SET_TRIGGER, len); // 15 bytes
+    cmd[15] = req.cmd_val;                               // + 1 bytes
+    ROS_INFO_STREAM("sending cmd: " << (char *)cmd);
+    serial_conn->send_bytes(cmd, len + 1);
+  }
+
+  else {
+    res.error = CMD_REPS_UNKOWN;
+    res.response_type = "ERROR";
+    return true;
+  }
 
   ros::Rate loop_rate(5);
   auto start = ros::Time::now().toSec();
 
-  while (ros::Time::now().toSec() - start < 10.01) {
+  while (ros::Time::now().toSec() - start < 2) {
     if (cmd_response.set) {
       res.error = 0;
       res.value = cmd_response.val;
-      cmd_response.set = false;
+      res.response_type = cmd_response.val_type;
       return true;
     }
     loop_rate.sleep();
   }
 
-  return false;
+  res.error = CMD_RESP_TIMED_OUT;
+  res.response_type = "ERROR";
+  return true;
 }
 
 } // namespace ic_sync

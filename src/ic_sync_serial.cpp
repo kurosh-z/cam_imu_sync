@@ -47,7 +47,6 @@ void IsyncSerial::connect() {
 
   io_thread =
       std::thread(boost::bind(&boost::asio::io_service::run, &io_service));
-  // io_service.run();
 }
 void IsyncSerial::on_read(std::error_code error, size_t bytes_transferred) {
   if (error) {
@@ -92,91 +91,111 @@ void IsyncSerial::parse_buf(size_t recieved_bytes) {
   auto first = boost::asio::buffer_cast<const uint8_t *>(buffer);
   auto last = first + recieved_bytes;
 
-  if (std::strncmp((const char *)first, RESP_GET_EXPOSURE, 17) == 0) {
-    uint16_t exposure_ms = utils::sys_get_be16(&first[17]);
-    ROS_INFO_STREAM("got exposure_ms: " << exposure_ms);
-    cmd_signal("EXPOSURE", exposure_ms);
-    received_data_buf.consume(recieved_bytes);
+  if (std::strncmp((const char *)first, "IMU", 3) == 0) {
 
-    return;
-  }
+    // else it should be imu message
+    uint64_t seq = utils::sys_get_be64(first + 3);        // 8 bytes
+    uint64_t imu_stamp = utils::sys_get_be64(first + 11); // 8 bytes
+    std::array<double, 3> accel = {0, 0, 0};
+    std::array<double, 3> gyro = {0, 0, 0};
+    std::array<double, 3> magn = {0, 0, 0};
+    for (int i = 0; i < 3; i++) {
 
-  // else it should be imu message
-  uint64_t seq = utils::sys_get_be64(first);           // 8 bytes
-  uint64_t imu_stamp = utils::sys_get_be64(first + 8); // 8 bytes
-  std::array<double, 3> accel = {0, 0, 0};
-  std::array<double, 3> gyro = {0, 0, 0};
-  std::array<double, 3> magn = {0, 0, 0};
-  for (int i = 0; i < 3; i++) {
+      switch (i) {
+      case 0:
+        accel[0] = (double)(utils::decode_int32(first + 3 + 16 + i * 24)) +
+                   (double)(utils::decode_int32(first + 3 + 16 + i * 24 + 4)) /
+                       1000000;
+        accel[1] = (double)(utils::decode_int32(first + 3 + 24 + i * 24)) +
+                   (double)(utils::decode_int32(first + 3 + 24 + i * 24 + 4)) /
+                       1000000;
+        accel[2] = (double)(utils::decode_int32(first + 3 + 32 + i * 24)) +
+                   (double)(utils::decode_int32(first + 3 + 32 + i * 24 + 4)) /
+                       1000000;
+        break;
+      case 1:
+        gyro[0] = (double)(utils::decode_int32(first + 3 + 16 + i * 24)) +
+                  (double)(utils::decode_int32(first + 3 + 16 + i * 24 + 4)) /
+                      1000000;
+        gyro[1] = (double)(utils::decode_int32(first + 3 + 24 + i * 24)) +
+                  (double)(utils::decode_int32(first + 3 + 24 + i * 24 + 4)) /
+                      1000000;
+        gyro[2] = (double)(utils::decode_int32(first + 3 + 32 + i * 24)) +
+                  (double)(utils::decode_int32(first + 3 + 32 + i * 24 + 4)) /
+                      1000000;
+        break;
+      case 2:
+        magn[0] = (double)(utils::decode_int32(first + 3 + 16 + i * 24)) +
+                  (double)(utils::decode_int32(first + 3 + 16 + i * 24 + 4)) /
+                      1000000;
+        magn[1] = (double)(utils::decode_int32(first + 3 + 24 + i * 24)) +
+                  (double)(utils::decode_int32(first + 3 + 24 + i * 24 + 4)) /
+                      1000000;
+        magn[2] = (double)(utils::decode_int32(first + 3 + 32 + i * 24)) +
+                  (double)(utils::decode_int32(first + 3 + 32 + i * 24 + 4)) /
+                      1000000;
+        break;
+      }
+    }
+    uint8_t triggered = first[91];
 
-    switch (i) {
-    case 0:
-      accel[0] =
-          (double)(utils::decode_int32(first + 16 + i * 24)) +
-          (double)(utils::decode_int32(first + 16 + i * 24 + 4)) / 1000000;
-      accel[1] =
-          (double)(utils::decode_int32(first + 24 + i * 24)) +
-          (double)(utils::decode_int32(first + 24 + i * 24 + 4)) / 1000000;
-      accel[2] =
-          (double)(utils::decode_int32(first + 32 + i * 24)) +
-          (double)(utils::decode_int32(first + 32 + i * 24 + 4)) / 1000000;
-      break;
-    case 1:
-      gyro[0] =
-          (double)(utils::decode_int32(first + 16 + i * 24)) +
-          (double)(utils::decode_int32(first + 16 + i * 24 + 4)) / 1000000;
-      gyro[1] =
-          (double)(utils::decode_int32(first + 24 + i * 24)) +
-          (double)(utils::decode_int32(first + 24 + i * 24 + 4)) / 1000000;
-      gyro[2] =
-          (double)(utils::decode_int32(first + 32 + i * 24)) +
-          (double)(utils::decode_int32(first + 32 + i * 24 + 4)) / 1000000;
-      break;
-    case 2:
-      magn[0] =
-          (double)(utils::decode_int32(first + 16 + i * 24)) +
-          (double)(utils::decode_int32(first + 16 + i * 24 + 4)) / 1000000;
-      magn[1] =
-          (double)(utils::decode_int32(first + 24 + i * 24)) +
-          (double)(utils::decode_int32(first + 24 + i * 24 + 4)) / 1000000;
-      magn[2] =
-          (double)(utils::decode_int32(first + 32 + i * 24)) +
-          (double)(utils::decode_int32(first + 32 + i * 24 + 4)) / 1000000;
-      break;
+    CamTrigger camtrig = {
+        .triggered = triggered ? true : false,
+        .seq = 0,
+        .timestamp = 0,
+    };
+    camtrig.seq = utils::sys_get_be64(first + 92);
+    camtrig.timestamp = utils::sys_get_be64(first + 100);
+    if (seq % 400 == 0) {
+      std::cout << "recieved bytes: " << recieved_bytes << std::endl;
+      std::cout << "seq:" << seq << " imu_stamp: " << imu_stamp << std::endl;
+
+      std::cout << "accel: " << accel[0] << " , " << accel[1] << " , "
+                << accel[2] << std::endl;
+
+      std::cout << "gyro: " << gyro[0] << " , " << gyro[1] << " , " << gyro[2]
+                << std::endl;
+
+      std::cout << "magn: " << magn[0] << " , " << magn[1] << " , " << magn[2]
+                << std::endl;
+      if (triggered) {
+        uint32_t trigger_seq = utils::sys_get_be64(first + 92);
+        uint32_t trigger_timestamp = utils::sys_get_be64(first + 100);
+        camtrig.seq = trigger_seq;
+        camtrig.timestamp = trigger_timestamp;
+        std::cout << "trig_seq: " << trigger_seq << std::endl;
+        std::cout << "trig_timestamp: " << trigger_timestamp << std::endl;
+      }
+      std::cout << "\n---------------------------------\n\n" << std::endl;
+    }
+
+    if (serial_recieved_cb) {
+      serial_recieved_cb(seq, timestamp, accel, gyro, magn, camtrig);
     }
   }
-  uint8_t triggered = first[88];
 
-  CamTrigger camtrig = {
-      .triggered = triggered ? true : false,
-      .seq = 0,
-      .timestamp = 0,
-  };
-  if (seq % 400 == 0) {
-    std::cout << "recieved bytes: " << recieved_bytes << std::endl;
-    std::cout << "seq:" << seq << " imu_stamp: " << imu_stamp << std::endl;
-
-    std::cout << "accel: " << accel[0] << " , " << accel[1] << " , " << accel[2]
-              << std::endl;
-
-    std::cout << "gyro: " << gyro[0] << " , " << gyro[1] << " , " << gyro[2]
-              << std::endl;
-
-    std::cout << "magn: " << magn[0] << " , " << magn[1] << " , " << magn[2]
-              << std::endl;
-    if (triggered) {
-      uint32_t trigger_seq = utils::sys_get_be64(first + 89);
-      uint32_t trigger_timestamp = utils::sys_get_be64(first + 97);
-      camtrig.seq = trigger_seq;
-      camtrig.timestamp = trigger_timestamp;
-      std::cout << "trig_seq: " << trigger_seq << std::endl;
-      std::cout << "trig_timestamp: " << trigger_timestamp << std::endl;
-    }
-    std::cout << "\n---------------------------------\n\n" << std::endl;
-  }
-  if (serial_recieved_cb) {
-
-    serial_recieved_cb(seq, timestamp, accel, gyro, magn, camtrig);
+  else if (std::strncmp((const char *)first, RESP_GET_EXPOSURE, 17) == 0) {
+    std::cout << "-----------------------------\n";
+    uint16_t exposure_ms = utils::sys_get_be32(&first[17]);
+    ROS_INFO_STREAM("got get exposure_ms response: " << exposure_ms);
+    cmd_signal(RESP_GET_EXPOSURE, exposure_ms);
+  } else if (std::strncmp((const char *)first, RESP_SET_EXPOSURE, 17) == 0) {
+    std::cout << "-----------------------------\n";
+    uint16_t exposure_ms = utils::sys_get_be32(&first[17]);
+    ROS_INFO_STREAM("got set exposure_ms resp: " << exposure_ms);
+    cmd_signal(RESP_SET_EXPOSURE, exposure_ms);
+  } else if (std::strncmp((const char *)first, RESP_GET_TRIGGER, 16) == 0) {
+    std::cout << "-----------------------------\n";
+    uint8_t trigger_state = first[16];
+    ROS_INFO_STREAM("got get trigger state resp: " << trigger_state);
+    cmd_signal(RESP_GET_TRIGGER, trigger_state);
+  } else if (std::strncmp((const char *)first, RESP_SET_TRIGGER, 16) == 0) {
+    std::cout << "-----------------------------\n";
+    uint8_t trigger_state = first[16];
+    ROS_INFO_STREAM("got set trigger state resp: " << trigger_state);
+    cmd_signal(RESP_SET_TRIGGER, trigger_state);
+  } else {
+    ROS_WARN("Got unknown response! ");
   }
   received_data_buf.consume(recieved_bytes);
 
@@ -204,11 +223,13 @@ void IsyncSerial::send_bytes(uint8_t *msg, size_t len) {
     auto tx_buf = new std::array<uint8_t, 128>();
 
     std::memcpy(tx_buf->begin(), msg, len);
+    // add message ending characters
+    std::memcpy(tx_buf->begin() + len, END_OF_MSG, 8);
     SharedBufferPtr_t tx_ptr(tx_buf);
     wr_buf.push_back(tx_ptr);
   }
 
-  io_service.post(boost::bind(&IsyncSerial::do_write, this, true, len));
+  io_service.post(boost::bind(&IsyncSerial::do_write, this, true, len + 8));
 
   // io_thread =
   //     std::thread([this]() { utils::set_this_thread_name("ic_serial%zu", 1);

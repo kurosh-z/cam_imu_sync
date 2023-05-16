@@ -19,6 +19,9 @@
 namespace ic_sync {
 #define DEFAULT_BAUDRATE 115200
 
+#define CMD_REPS_UNKOWN -100
+#define CMD_RESP_TIMED_OUT -101
+
 class ICamNodelet : public nodelet::Nodelet {
 public:
   static constexpr auto DEFAULT_DEVICE_NAME = "/dev/ttyACM0";
@@ -48,6 +51,7 @@ protected:
   };
   struct cmd_response_t cmd_response;
   ros::ServiceServer cmd_srv;
+  std::recursive_mutex cmd_srv_mutex;
   bool cmd_service_handler(imu_cam_sync::cmd_imu::Request &req,
                            imu_cam_sync::cmd_imu::Response &res);
 };
