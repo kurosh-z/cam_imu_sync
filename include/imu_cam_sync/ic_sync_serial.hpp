@@ -14,6 +14,7 @@
 #include <ros/ros.h>
 #include <thread>
 
+#include "imu_cam_sync/TimestampBuff.hpp"
 #include "imu_cam_sync/bytes_utils.hpp"
 #include "imu_cam_sync/thread_utils.hpp"
 
@@ -35,8 +36,8 @@ class IsyncSerial {
 public:
   static constexpr unsigned int RX_MAX_SIZE = 256;
   static constexpr unsigned int MAX_WRQ_SIZE = 3;
-  static constexpr auto DEFAULT_DEVICE_NAME = "/dev/ttyACM0";
-  static constexpr auto DEFAULT_BAUDRATE = 115200;
+  static constexpr auto DEFAULT_DEVICE_NAME = "/dev/ttyTEL1";
+  static constexpr auto DEFAULT_BAUDRATE = 921600;
   static constexpr auto END_OF_MSG = "ENDOFMSG";
 
   // CMD:
@@ -80,6 +81,9 @@ protected:
   std::atomic<bool> tx_in_progress;
   std::recursive_mutex mutex;
   boost::asio::streambuf received_data_buf;
+
+  utils::TimestampBuff<uint64_t, 10> imu_timestamps;
+  utils::TimestampBuff<uint64_t, 10> trigger_timestamps;
 
   void do_read();
   void on_read(std::error_code error, size_t bytes_transferred);

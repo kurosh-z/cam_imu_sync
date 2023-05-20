@@ -96,11 +96,11 @@ void IsyncSerial::parse_buf(size_t recieved_bytes) {
     // else it should be imu message
     uint64_t seq = utils::sys_get_be64(first + 3);        // 8 bytes
     uint64_t imu_stamp = utils::sys_get_be64(first + 11); // 8 bytes
+
     std::array<double, 3> accel = {0, 0, 0};
     std::array<double, 3> gyro = {0, 0, 0};
     std::array<double, 3> magn = {0, 0, 0};
     for (int i = 0; i < 3; i++) {
-
       switch (i) {
       case 0:
         accel[0] = (double)(utils::decode_int32(first + 3 + 16 + i * 24)) +
@@ -144,33 +144,44 @@ void IsyncSerial::parse_buf(size_t recieved_bytes) {
         .seq = 0,
         .timestamp = 0,
     };
-    camtrig.seq = utils::sys_get_be64(first + 92);
-    camtrig.timestamp = utils::sys_get_be64(first + 100);
-    if (seq % 400 == 0) {
-      std::cout << "recieved bytes: " << recieved_bytes << std::endl;
-      std::cout << "seq:" << seq << " imu_stamp: " << imu_stamp << std::endl;
+    if (triggered) {
+      uint32_t trigger_seq = utils::sys_get_be64(first + 92);
+      uint32_t trigger_timestamp = utils::sys_get_be64(first + 100);
+      camtrig.seq = trigger_seq;
+      camtrig.timestamp = trigger_timestamp;
+      // std::cout << "trig_seq: " << trigger_seq << std::endl;
+      // std::cout << "trig_timestamp: " << trigger_timestamp << std::endl;
+    }
+    if (!imu_timestamps.is_zero_time_set()) {
+      imu_timestamps.set_zero_time(timestamp);
+    }
+    imu_timestamps.append_received_ts(timestamp);
+    auto imu_ts_pair = imu_timestamps.append_ts(imu_stamp, seq, triggered);
 
-      std::cout << "accel: " << accel[0] << " , " << accel[1] << " , "
-                << accel[2] << std::endl;
-
-      std::cout << "gyro: " << gyro[0] << " , " << gyro[1] << " , " << gyro[2]
-                << std::endl;
-
-      std::cout << "magn: " << magn[0] << " , " << magn[1] << " , " << magn[2]
-                << std::endl;
-      if (triggered) {
-        uint32_t trigger_seq = utils::sys_get_be64(first + 92);
-        uint32_t trigger_timestamp = utils::sys_get_be64(first + 100);
-        camtrig.seq = trigger_seq;
-        camtrig.timestamp = trigger_timestamp;
-        std::cout << "trig_seq: " << trigger_seq << std::endl;
-        std::cout << "trig_timestamp: " << trigger_timestamp << std::endl;
-      }
-      std::cout << "\n---------------------------------\n\n" << std::endl;
+    if (triggered && !imu_ts_pair.second) {
+      auto trig_diff = imu_timestamps.append_triggered_ts(imu_ts_pair.first);
+      // ROS_INFO_STREAM("[parse_buf] trigg_diff: " << trig_diff);
     }
 
-    if (serial_recieved_cb) {
-      serial_recieved_cb(seq, timestamp, accel, gyro, magn, camtrig);
+    // if (seq % 400 == 0) {
+    //   std::cout << "recieved bytes: " << recieved_bytes << std::endl;
+    //   std::cout << "seq:" << seq << " imu_stamp: " << imu_stamp << std::endl;
+
+    //   std::cout << "accel: " << accel[0] << " , " << accel[1] << " , "
+    //             << accel[2] << std::endl;
+
+    //   std::cout << "gyro: " << gyro[0] << " , " << gyro[1] << " , " <<
+    //   gyro[2]
+    //             << std::endl;
+
+    //   std::cout << "magn: " << magn[0] << " , " << magn[1] << " , " <<
+    //   magn[2]
+    //             << std::endl;
+    //   std::cout << "\n---------------------------------\n\n" << std::endl;
+    // }
+
+    if (serial_recieved_cb && !imu_ts_pair.second) {
+      serial_recieved_cb(seq, imu_ts_pair.first, accel, gyro, magn, camtrig);
     }
   }
 

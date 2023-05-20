@@ -1,4 +1,4 @@
-<library path="lib/libic_sync_nodelet">
+<library path="lib/libimu_cam_sync">
   <class name="imu_cam_sync/ICamNodelet"  type="ic_sync::ICamNodelet" base_class_type="nodelet::Nodelet">
     <description> camera imu sync</description>
   </class>

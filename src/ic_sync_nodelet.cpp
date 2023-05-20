@@ -12,7 +12,7 @@ ICamNodelet::~ICamNodelet() {
 
 void ICamNodelet::onInit() {
   ROS_INFO("=================================================================");
-  NODELET_INFO("VCamNodelet - %s", __FUNCTION__);
+  NODELET_INFO("ICamNodelet - %s", __FUNCTION__);
 
   ros::NodeHandle &nh = getNodeHandle();
   ros::NodeHandle &local_nh = getPrivateNodeHandle();
@@ -21,10 +21,10 @@ void ICamNodelet::onInit() {
   local_nh.param<int>("baudrate", baudrate, DEFAULT_BAUDRATE);
   ROS_INFO_STREAM("dev_name: " << dev_name << ", baudrate: " << baudrate);
 
-  imu_raw_pub = nh.advertise<sensor_msgs::Imu>("ic_sync/imu/data_raw", 10);
-  magn_pub = nh.advertise<sensor_msgs::MagneticField>("ic_sync/mag", 10);
-  camtrigger_pub =
-      nh.advertise<imu_cam_sync::ICtrigger>("ic_sync/camTrigger", 10);
+  imu_raw_pub = nh.advertise<sensor_msgs::Imu>("imu_cam_sync/imu/data_raw", 10);
+  magn_pub = nh.advertise<sensor_msgs::MagneticField>("imu_cam_sync/mag", 10);
+  camtrigger_pub = nh.advertise<imu_cam_msgs::ICtrigger>(
+      "imu_cam_sync/cam_trigger_stamp", 10);
 
   SerialReceivedCb serialCB =
       [&](std::uint64_t seq, ros::Time timestamp, std::array<double, 3> accel,
@@ -79,21 +79,19 @@ void ICamNodelet::publish_imu_cam(std::uint64_t seq, ros::Time timestamp,
   imu_raw_pub.publish(imu_raw_msg);
   magn_pub.publish(magn_msg);
   if (camtrig.triggered) {
-    imu_cam_sync::ICtrigger cam_trig_msg;
-    cam_trig_msg.cor_imu_seq = seq;
+    imu_cam_msgs::ICtrigger cam_trig_msg;
+    cam_trig_msg.corr_imu_seq = seq;
     cam_trig_msg.Header.frame_id = "";
     cam_trig_msg.Header.seq = camtrig.seq;
     cam_trig_msg.Header.stamp = timestamp;
-    // TODO: fix this in message definition
-    cam_trig_msg.timedelay = camtrig.timestamp;
     camtrigger_pub.publish(cam_trig_msg);
   }
 
   return;
 }
 
-bool ICamNodelet::cmd_service_handler(imu_cam_sync::cmd_imu::Request &req,
-                                      imu_cam_sync::cmd_imu::Response &res) {
+bool ICamNodelet::cmd_service_handler(imu_cam_msgs::cmd_imu::Request &req,
+                                      imu_cam_msgs::cmd_imu::Response &res) {
 
   std::lock_guard<std::recursive_mutex> lock(cmd_srv_mutex);
   cmd_response.set = false;
@@ -137,7 +135,7 @@ bool ICamNodelet::cmd_service_handler(imu_cam_sync::cmd_imu::Request &req,
   ros::Rate loop_rate(5);
   auto start = ros::Time::now().toSec();
 
-  while (ros::Time::now().toSec() - start < 2) {
+  while (ros::Time::now().toSec() - start < 4) {
     if (cmd_response.set) {
       res.error = 0;
       res.value = cmd_response.val;
